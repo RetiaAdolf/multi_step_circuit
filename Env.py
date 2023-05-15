@@ -3,65 +3,103 @@ import os
 import random
 import numpy as np
 import copy
+import itertools
 class Env(object):
 	"""docstring for Env"""
-	def __init__(self):
+	def __init__(self, env_id):
 		super(Env, self).__init__()
-		self.action_space = np.array([[-1.0, 1.0], [-1.0, 1.0], [-0.1, 0.1]])
-		self.state_dim = 4 + 3 + 4
+		__input_num__ = 3
+		__action_num__ = 3
+		__ouput_num__ = 4
 
-		self.eval_list = []
-		for _ in range(10):
-			_ = self.reset()
-			self.eval_list.append([self.weight,self.control,self.output])
+		self.env_id = env_id
+		self.action_dim = __input_num__ ** __action_num__
+		self.state_dim = __ouput_num__
+
+		self.joint_action_mapping = list(itertools.product([-1,0,1],repeat=3))
+
+		self.input_range = np.array([[12, 60], [12, 60], [0, 50]])
+		self.output_range = np.array([[31.8, 35], [-10.098753, -1.175], [11, 14.7], [1.72, 13.5]])
+
+		self.target_output = None
+		self.normalized_target_output = None
+		self.cur_input = None
+		self.cur_output = None
+		self.normalized_cur_output = None
+
+		self.eval_targets = []
+		for _ in range(8):
+			self.eval_targets.append(self.random_target())
 
 	def reset(self):
-		_weight = np.random.rand(4)
-		_weight = np.exp(_weight)
-		_weight = _weight / _weight.sum()
-		self.weight = _weight
 
-		_action_space = np.array([[12, 60], [12, 60], [0.00, 0.50]])
-		_control = self.random_action(_action_space)
-		self.control = _control
+		self.target_output = self.random_target()
 
-		_output = self.__simulator_step__(self.control)
-		self.output = _output
+		self.cur_input = np.array([32, 32, 25])#self.random_input()
 
-		self.state = self.__get_state__(self.weight, self.control, self.output)
+		self.cur_output = self.__simulator_step__(self.cur_input)
 
-		return self.state
+		state = self.__get_state__(self.cur_input, self.cur_output, self.target_output)
 
-	def reset_eval(self, idx):
-		eval_instance = self.eval_list[idx]
-		self.weight = eval_instance[0]
-		self.control = eval_instance[1]
-		self.output = eval_instance[2]
-		self.state = self.__get_state__(self.weight, self.control, self.output)
-		return self.state
+		return state
 
-	def random_action(self, action_space):
-		rand_aciton = []
-		for action in action_space:
-			rand_aciton.append(round(random.uniform(action[0],action[1]), 2))
-		return np.array(rand_aciton)
 
+	def reset_eval(self, index):
+		self.target_output = self.eval_targets[index]
+
+		self.cur_input = np.array([32, 32, 25])
+
+		self.cur_output = self.__simulator_step__(self.cur_input)
+
+		state = self.__get_state__(self.cur_input, self.cur_output, self.target_output)
+
+		return state
+
+	def reset_test(self, target_output):
+		self.target_output = target_output
+		self.cur_input = np.array([32, 32, 25])
+		self.cur_output = self.__simulator_step__(self.cur_input)
+		state = self.__get_state__(self.cur_input, self.cur_output, self.target_output)
+		return state
+
+
+	def random_target(self):
+		rand_output = []
+		for output_range in self.output_range:
+			rand_output.append(round(random.uniform(output_range[0],output_range[1]), 2))
+		return np.array(rand_output)
+
+	def random_input(self):
+		rand_input = []
+		for input_range in self.input_range:
+			rand_input.append(random.randint(input_range[0],input_range[1]))
+		return np.array(rand_input)
+
+
+	def run_command(self, container_name, command):
+		with open('/dev/null', 'w') as f:
+			process = subprocess.Popen([command], stdout=f, stderr=f)
+		return process
 
 	def __simulator_step__(self, action):
 		M3_W, M7_W, IN_OFST = action
+		IN_OFST = IN_OFST / 100.0
 		M3_W = str(M3_W)
 		M7_W = str(M7_W)
 		IN_OFST = str(IN_OFST)
-		file_path = 'data/M3W_{}_M7W_{}_INOFST_{}.txt'.format(M3_W, M7_W, IN_OFST)
+		file_path = '../data/M3W_{}_M7W_{}_INOFST_{}.txt'.format(M3_W, M7_W, IN_OFST)
 		while not os.path.exists(file_path):
-			subprocess.run(['make', 'M3_W={}'.format(M3_W), 'M7_W={}'.format(M7_W), 'IN_OFST={}'.format(IN_OFST)], stdout=subprocess.PIPE)
-		with open(file_path, 'r') as f:
-			data = f.readline().split()
-			while not data:
-				data = f.readline().split()
-			data = f.readline().split()
-			PowerDC, GBW, RmsNoise, SettlingTime = self.__read_data__(data)
-		f.close()
+			command = "make -C /mnt/mydata/RL_{}/run/ M3_W={} M7_W={} IN_OFST={}".format(self.env_id, M3_W, M7_W, IN_OFST)
+			process = run_command(container_name, command)
+			try:
+				process.wait(timeout=100)
+			except:
+				pgid = os.getpgid(process.pid)
+				os.killpg(pgid, signal.SIGTERM)
+
+		data = self.__read_file__(file_path)
+		PowerDC, GBW, RmsNoise, SettlingTime = self.__read_data__(data)
+
 		return [PowerDC, GBW, RmsNoise, SettlingTime]
 
 	def __read_data__(self, data):
@@ -82,6 +120,7 @@ class Env(object):
 			GBW = GBW * 1e-3
 		elif GBW_unit == "G":
 			GBW = GBW * 1e3
+		GBW = -GBW
 
 		RmsNoise = float(data[6][:-1])
 		RmsNoise_unit = data[6][-1]
@@ -104,66 +143,44 @@ class Env(object):
 
 		return PowerDC, GBW, RmsNoise, SettlingTime
 
-	def __get_state__(self, weight, control, output):
-		return np.concatenate([weight, control, output], axis=-1) 
+	def __get_state__(self, input, output, target):
+		normalized_output = self.__normalization__(output)
+		normalized_target = self.__normalization__(target)
 
-	def __get_reward__(self, weight, output):
-		return (weight * output).sum(axis=-1)
+		return np.concatenate([input, normalized_output, normalized_target]) 
+
+	def __get_reward__(self, output, target):
+		normalized_output = self.__normalization__(output)
+		normalized_target = self.__normalization__(target)
+		reward = -(normalized_output - normalized_target).abs().sum()
+
+		return reward if reward < -0.01 else 10
 
 	def __normalization__(self, output):
-		PowerDC, GBW, RmsNoise, SettlingTime = output
+		output_min = self.output_range[:, 0]
+		output_max = self.output_range[:, 1]
+		normalized_output = (output - output_min) / (output_max - output_min)
 
-		PowerDC = ((35 - PowerDC) / (35 - 31.8))
-		GBW = ((GBW - 1.17) / (10.098753 - 1.175))
-		RmsNoise = ((14.7 - RmsNoise) / (14.7 - 11))
-		SettlingTime = ((13.5 - SettlingTime) / (13.5 - 1.72))
+		return normalized_output
 
-		return np.array([PowerDC, GBW, RmsNoise, SettlingTime])
+	def __modify_input__(self, cur_input, action_id):
+		actions = np.array(self.joint_action_mapping[action_id])
+		return cur_input + actions
 
 	def step(self, action):
 
-		self.control = self.control + action
-		self.output = self.__simulator_step__(self.control)
-		self.state = self.__get_state__(self.weight, self.control, self.output)
+		self.cur_input = self.__modify_input__(self.cur_input, action)
 
-		_normalize_output = self.__normalization__(self.output)
+		self.cur_output = self.__simulator_step__(self.cur_input)
 
-		reward = self.__get_reward__(self.weight, _normalize_output)
+		state = self.__get_state__(self.cur_input, self.cur_output, self.target_output)
 
-		return self.state, reward
+		reward = self.__get_reward__(self.cur_output, self.target_output)
 
-	def dummy_step(self, state, action, next_state):
-
-		_state = copy.deepcopy(state)
-		_action = copy.deepcopy(action)
-		_next_state = copy.deepcopy(next_state)
-
-		_weight = np.random.rand(4)
-		_weight = np.exp(_weight)
-		_weight = _weight / _weight.sum()
-		_state[:4] = _weight
-		_next_state[:4] = _weight
-		_output = _next_state[-4:]
-		_normalize_output = self.__normalization__(_output)
-		_reward = self.__get_reward__(_weight, _normalize_output)
-
-		return _state, _action, _reward, _next_state
+		return state, reward
 
 
 
 
 if __name__ == '__main__':
-	test_env = Env()
-	state = test_env.reset()
-	print(test_env.state)
-	print(test_env.weight)
-	print(test_env.control)
-	print(test_env.output)
-	for h in range(10):
-		print("------------------{}---------------".format(h))
-		action = test_env.random_action(test_env.action_space)
-		next_state, reward = test_env.step(action)
-		dummy_state, dummy_action, dummy_reward, dummy_next_state = test_env.dummy_step(state, action, next_state)
-		print(state, action, reward, next_state)
-		print(dummy_state, dummy_action, dummy_reward, dummy_next_state)
-		state = next_state
+	pass

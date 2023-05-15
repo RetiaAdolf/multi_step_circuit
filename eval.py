@@ -3,7 +3,7 @@ from Agent import SAC
 import numpy as np
 import random
 import sys
-
+'''
 w_PowerDC, w_GBW, w_RmsNoise, w_SettlingTime, iters, alpha = sys.argv[1:]
 model_path = "./checkpoints/sac_checkpoint_EDA_iter_{}".format(iters)
 hidden_size = 256
@@ -38,3 +38,27 @@ print("M3_W = {}, M7_W = {}, IN_OFST = {}".format(M3_W, M7_W, IN_OFST))
 PowerDC, GBW, RmsNoise, SettlingTime = output
 print("PowerDC = {}, GBW = {}, RmsNoise = {}, SettlingTime = {}".format(PowerDC, GBW, RmsNoise, SettlingTime))
 print(reward)
+'''
+
+from Env import Env
+from Agent import PPO
+from Runner import runner
+import numpy as np
+import random
+
+w_PowerDC, w_GBW, w_RmsNoise, w_SettlingTime, iters = sys.argv[1:]
+model_path = "models/EDA_iter_{}".format(iters)
+hidden_size = 64
+log = open('train_multi_log.txt', 'a')
+
+SimEnv = Env(1)
+agent = PPO(input_dim=SimEnv.state_dim, 
+			action_dim=SimEnv.action_dim, 
+			hidden_dim=hidden_size)
+agent.load_checkpoint(ckpt_path=model_path, evaluate=True)
+
+state = SimEnv.reset()
+for i in range(25):
+	action, _ = agent.get_action(state)
+	next_state, _ = SimEnv.step(action)
+	print("step {}, input {}, output {}".format(i, SimEnv.cur_input. SimEnv.cur_output))

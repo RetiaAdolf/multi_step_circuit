@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions import Normal
+from torch.distributions import Normal, Categorical
 
 LOG_SIG_MAX = 2
 LOG_SIG_MIN = -20
@@ -32,6 +32,35 @@ class ValueNetwork(nn.Module):
         x = F.relu(self.linear2(x))
         x = self.linear3(x)
         return x
+
+
+class PPOPolicy(nn.Module):
+    def __init__(self, num_inputs, hidden_dim, action_dim):
+        super(PPOPolicy, self).__init__()
+
+        self.linear1 = nn.Linear(num_inputs, hidden_dim)
+        self.linear2 = nn.Sequential(
+                       nn.Linear(hidden_dim, hidden_dim * 2),
+                       nn.ELU(),
+                       nn.Linear(hidden_dim * 2, hidden_dim))
+        self.linear_pi = nn.Linear(hidden_dim, action_dim)
+        self.linear_v = nn.Linear(hidden_dim, 1)
+
+        self.apply(weights_init_)
+
+	def forward(self, state, action=None):
+		x = F.relu(self.linear1(state))
+		x = F.relu(self.linear2(x))
+		logit = self.linear_pi(x)
+		value = self.linear_v(x)
+		dist = Categorical(logits=x)
+		if action is None:
+			action = dist.sample()
+		else:
+			action = action
+		log_prob = dist.log_prob(action)
+
+		return action, log_prob, value, dist.entropy()
 
 
 class QNetwork(nn.Module):
