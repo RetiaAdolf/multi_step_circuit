@@ -1,9 +1,11 @@
 import subprocess
+import signal
 import os
 import random
 import numpy as np
 import copy
 import itertools
+import time
 class Env(object):
 	"""docstring for Env"""
 	def __init__(self, env_id):
@@ -13,8 +15,9 @@ class Env(object):
 		__ouput_num__ = 4
 
 		self.env_id = env_id
+		print("init env id {}".format(self.env_id))
 		self.action_dim = __input_num__ ** __action_num__
-		self.state_dim = __ouput_num__
+		self.state_dim = __ouput_num__* 2 + __input_num__
 
 		self.joint_action_mapping = list(itertools.product([-1,0,1],repeat=3))
 
@@ -28,11 +31,10 @@ class Env(object):
 		self.normalized_cur_output = None
 
 		self.eval_targets = []
-		for _ in range(8):
+		for _ in range(6):
 			self.eval_targets.append(self.random_target())
 
 	def reset(self):
-
 		self.target_output = self.random_target()
 
 		self.cur_input = np.array([32, 32, 25])#self.random_input()
@@ -44,8 +46,8 @@ class Env(object):
 		return state
 
 
-	def reset_eval(self, index):
-		self.target_output = self.eval_targets[index]
+	def reset_eval(self):
+		self.target_output = self.eval_targets[self.env_id-1]
 
 		self.cur_input = np.array([32, 32, 25])
 
@@ -76,10 +78,20 @@ class Env(object):
 		return np.array(rand_input)
 
 
-	def run_command(self, container_name, command):
+	def run_command(self, command, makefile_dir):
 		with open('/dev/null', 'w') as f:
-			process = subprocess.Popen([command], stdout=f, stderr=f)
+			process = subprocess.Popen(command, cwd=makefile_dir, stdout=f, stderr=f)
 		return process
+
+	def __read_file__(self, file_path):
+		with open(file_path, 'r') as f:
+			#print(file_path)
+			data = f.readline().split()
+			while not data:
+				data = f.readline().split()
+			data = f.readline().split()
+		f.close()
+		return data
 
 	def __simulator_step__(self, action):
 		M3_W, M7_W, IN_OFST = action
@@ -89,8 +101,10 @@ class Env(object):
 		IN_OFST = str(IN_OFST)
 		file_path = '../data/M3W_{}_M7W_{}_INOFST_{}.txt'.format(M3_W, M7_W, IN_OFST)
 		while not os.path.exists(file_path):
-			command = "make -C /mnt/mydata/RL_{}/run/ M3_W={} M7_W={} IN_OFST={}".format(self.env_id, M3_W, M7_W, IN_OFST)
-			process = run_command(container_name, command)
+			#command = "make -C /mnt/mydata/RL_{}/run/ M3_W={} M7_W={} IN_OFST={}".format(self.env_id, M3_W, M7_W, IN_OFST)
+			command = ["make", "M3_W={}".format(M3_W), "M7_W={}".format(M7_W), "IN_OFST={}".format(IN_OFST)]
+			makefile_dir = "/mnt/mydata/RL_{}/run/".format(self.env_id)
+			process = self.run_command(command,makefile_dir)
 			try:
 				process.wait(timeout=100)
 			except:
@@ -100,7 +114,7 @@ class Env(object):
 		data = self.__read_file__(file_path)
 		PowerDC, GBW, RmsNoise, SettlingTime = self.__read_data__(data)
 
-		return [PowerDC, GBW, RmsNoise, SettlingTime]
+		return np.array([PowerDC, GBW, RmsNoise, SettlingTime])
 
 	def __read_data__(self, data):
 		PowerDC = float(data[4][:-1])
@@ -152,9 +166,9 @@ class Env(object):
 	def __get_reward__(self, output, target):
 		normalized_output = self.__normalization__(output)
 		normalized_target = self.__normalization__(target)
-		reward = -(normalized_output - normalized_target).abs().sum()
+		reward = -np.abs((normalized_output - normalized_target)).sum()
 
-		return reward if reward < -0.01 else 10
+		return reward if reward < -0.01 else 100
 
 	def __normalization__(self, output):
 		output_min = self.output_range[:, 0]
@@ -165,17 +179,20 @@ class Env(object):
 
 	def __modify_input__(self, cur_input, action_id):
 		actions = np.array(self.joint_action_mapping[action_id])
-		return cur_input + actions
+		modified_action = cur_input + actions
+		clipped_action = np.clip(modified_action, self.input_range[:, 0], self.input_range[:, 1])
+		return clipped_action
 
 	def step(self, action):
 
+
 		self.cur_input = self.__modify_input__(self.cur_input, action)
-
+		start_time = time.time()
 		self.cur_output = self.__simulator_step__(self.cur_input)
-
+		print("env {}, time {}".format(self.env_id, time.time() - start_time))
 		state = self.__get_state__(self.cur_input, self.cur_output, self.target_output)
 
-		reward = self.__get_reward__(self.cur_output, self.target_output)
+		reward = self.__get_reward__(self.cur_output, self.target_output) * 0.1
 
 		return state, reward
 
@@ -183,4 +200,6 @@ class Env(object):
 
 
 if __name__ == '__main__':
-	pass
+	input_range = np.array([[12, 60], [12, 60], [0, 50]])
+	modified_action = np.array([11, 47, 36])
+	print(np.clip(modified_action, input_range[:, 0], input_range[:, 1]))

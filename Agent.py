@@ -2,7 +2,7 @@ import os
 import torch
 import torch.nn.functional as F
 from torch.optim import Adam
-from Model import DiscretePolicy, ValueNetwork
+from Model import PPOPolicy
 from collections import deque
 import copy
 import random
@@ -125,14 +125,13 @@ class SAC(object):
 
 class PPO(object):
 	"""docstring for PPO"""
-	def __init__(self, input_dim, action_dim, hidden_size):
+	def __init__(self, input_dim, action_dim, hidden_dim, gamma):
 		super(PPO, self).__init__()
-		self.alpha = 0.1
-		self.lr = 5e-6
-		self.gamma = 0.99
+		self.lr = 5e-5
+		self.gamma = gamma
 		self.K = 5
-		self.ratio_clip = 0.1
-		self.alpha = 0.5
+		self.ratio_clip = 0.3
+		self.alpha = 1.0
 		self.beta = 1e-4
 		self.device = torch.device("cuda")
 
@@ -144,7 +143,7 @@ class PPO(object):
 		action, log_prob, _, _ = self.policy(state)
 		return action.detach().cpu().numpy(), log_prob.detach().cpu().numpy()
 
-	def learn(batch):
+	def learn(self, batch):
 		old_states = batch['state']
 		old_states = torch.tensor(old_states, dtype=torch.float, device=self.device)
 		old_actions = batch['action']
@@ -153,18 +152,21 @@ class PPO(object):
 		old_log_probs = torch.tensor(old_log_probs, dtype=torch.float, device=self.device)
 		rewards = batch['return']
 		rewards = torch.tensor(rewards, dtype=torch.float, device= self.device)
+		mse_loss = 0
 		for _ in range(self.K):
-			_, log_probs, state_values, entropys = self.model(old_states, old_actions)
+			_, log_probs, state_values, entropys = self.policy(old_states, old_actions)
 			ratios = torch.exp(log_probs - old_log_probs)
 			advantages = rewards - state_values.detach()
 			surr1 = ratios * advantages
 			surr2 = torch.clamp(ratios, 1 - self.ratio_clip, 1 + self.ratio_clip) * advantages
 			mse_loss_cur = (state_values - rewards)**2
+			mse_loss += mse_loss_cur.mean().item()
 			loss = - torch.min(surr1, surr2) + self.alpha * mse_loss_cur - self.beta * entropys
 			loss = loss.mean()
 			self.optimizer.zero_grad()
 			loss.backward()
 			self.optimizer.step()
+		return mse_loss / self.K
 
 	def save_checkpoint(self, env_name, suffix="", ckpt_path=None):
 		if not os.path.exists('models/'):
