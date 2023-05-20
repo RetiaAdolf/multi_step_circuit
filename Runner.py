@@ -10,7 +10,7 @@ class runner(object):
 		self.worker_num = len(self.envs)
 		self.state_dim = self.envs[0].state_dim
 		self.action_dim = self.envs[0].action_dim
-		self.horizon = 25
+		self.horizon = 30
 		self.gamma = gamma
 		self.batch = {"state": np.zeros((self.horizon, self.worker_num, self.state_dim)),
 					  "action": np.zeros((self.horizon, self.worker_num, 1)),
@@ -70,14 +70,14 @@ class runner(object):
 			start_time = time.time()
 			action, log_prob = self.agent.get_action(state)
 			next_state, reward = self.step(action)
-			print("step {}, reward {}, time {}".format(h, np.mean(reward), time.time()-start_time))
+			#print("step {}, reward {}, time {}".format(h, np.mean(reward), time.time()-start_time))
 			self.batch['state'][h] = state
 			self.batch['action'][h] = action
 			self.batch['log_prob'][h] = log_prob
 			self.batch['reward'][h] = reward
 			state = next_state
 		self.batch['return'] = self.GetDiscountedReward(self.batch['reward'], self.gamma)
-		return self.batch, {'return': self.batch['return'][-1].mean()}
+		return self.batch, {'return': self.batch['return'][0].mean(), 'best_reward': self.batch['return'][-1].mean()}
 
 
 		

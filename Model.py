@@ -38,6 +38,7 @@ class PPOPolicy(nn.Module):
 	def __init__(self, num_inputs, hidden_dim, action_dim):
 		super(PPOPolicy, self).__init__()
 		self.linear1 = nn.Linear(num_inputs, hidden_dim)
+		self.MHA = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=16)
 		self.linear2 = nn.Sequential(
 					   nn.Linear(hidden_dim, hidden_dim * 2),
 					   nn.ELU(),
@@ -48,7 +49,12 @@ class PPOPolicy(nn.Module):
 		self.apply(weights_init_)
 
 	def forward(self, state, action=None):
-		x = F.relu(self.linear1(state))
+		b,l,v = state.shape
+		state = state.reshape(b*l, v)
+		embed = F.relu(self.linear1(state)).unsqueeze(0)
+		x, _ = self.MHA(embed,embed,embed)
+		x = x.squeeze(0)
+		x = x. reshape(b, l, -1)
 		x = F.relu(self.linear2(x))
 		logit = self.linear_pi(x)
 		value = self.linear_v(x)

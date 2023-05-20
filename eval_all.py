@@ -50,19 +50,27 @@ import random
 PowerDC, GBW, RmsNoise, SettlingTime, iters = sys.argv[1:]
 target_state = np.array([float(PowerDC), float(GBW), float(RmsNoise), float(SettlingTime)])
 model_path = "models/EDA_iter_{}".format(iters)
-hidden_size = 1024
+hidden_size = 512
 NUM_WORKERS = 6
-#'''
-SimEnv = Env(1)
-agent = PPO(input_dim=SimEnv.state_dim, 
-			action_dim=SimEnv.action_dim, 
+
+Envs = [Env(i) for i in range(1, 1 + NUM_WORKERS)]
+agent = PPO(input_dim=Envs[0].state_dim, 
+			action_dim=Envs[0].action_dim, 
 			hidden_dim=hidden_size,
 			gamma=0.99)
-if int(iters) > 0:
-	agent.load_checkpoint(ckpt_path=model_path, evaluate=True)
-state = SimEnv.reset_test(target_state)
-for i in range(25):
-	action, _ = agent.get_action(state[np.newaxis,])
-	next_state, reward = SimEnv.step(action[0])
-	state = next_state
-	print("step {}, input {}, output {}, reward {}".format(i, SimEnv.cur_input, SimEnv.cur_output, reward))
+
+best_reward = -9999
+best_model = 0
+runner = runner(Envs, agent, 0.99)
+for i in range(10000, 50000, 100):
+	model_path = "models/EDA_iter_{}".format(i)
+	try:
+		agent.load_checkpoint(ckpt_path=model_path, evaluate=True)
+	except:
+		continue
+	_, log = runner.run(bool_eval=True)
+	if log['best_reward'] > best_reward:
+		best_reward = log['best_reward']
+		best_model = i
+print(best_model, best_reward)
+'''

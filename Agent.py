@@ -127,12 +127,12 @@ class PPO(object):
 	"""docstring for PPO"""
 	def __init__(self, input_dim, action_dim, hidden_dim, gamma):
 		super(PPO, self).__init__()
-		self.lr = 5e-5
+		self.lr = 3e-5
 		self.gamma = gamma
 		self.K = 5
-		self.ratio_clip = 0.3
-		self.alpha = 1.0
-		self.beta = 1e-4
+		self.ratio_clip = 0.2
+		self.alpha = 0.5
+		self.beta = 1e-2
 		self.device = torch.device("cuda")
 
 		self.policy = PPOPolicy(input_dim, hidden_dim, action_dim).to(self.device)
@@ -140,8 +140,9 @@ class PPO(object):
 
 	def get_action(self, state):
 		state = torch.tensor(state, dtype=torch.float, device=self.device)
+		state = state.unsqueeze(0)
 		action, log_prob, _, _ = self.policy(state)
-		return action.detach().cpu().numpy(), log_prob.detach().cpu().numpy()
+		return action.squeeze(0).detach().cpu().numpy(), log_prob.squeeze(0).detach().cpu().numpy()
 
 	def learn(self, batch):
 		old_states = batch['state']
@@ -156,7 +157,7 @@ class PPO(object):
 		for _ in range(self.K):
 			_, log_probs, state_values, entropys = self.policy(old_states, old_actions)
 			ratios = torch.exp(log_probs - old_log_probs)
-			advantages = rewards - state_values.detach()
+			advantages = (rewards - state_values).detach()
 			surr1 = ratios * advantages
 			surr2 = torch.clamp(ratios, 1 - self.ratio_clip, 1 + self.ratio_clip) * advantages
 			mse_loss_cur = (state_values - rewards)**2

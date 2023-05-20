@@ -18,11 +18,14 @@ class Env(object):
 		print("init env id {}".format(self.env_id))
 		self.action_dim = __input_num__ ** __action_num__
 		self.state_dim = __ouput_num__* 2 + __input_num__
+		self.num_hit = 0
 
 		self.joint_action_mapping = list(itertools.product([-1,0,1],repeat=3))
 
 		self.input_range = np.array([[12, 60], [12, 60], [0, 50]])
-		self.output_range = np.array([[31.8, 35], [-10.098753, -1.175], [11, 14.7], [1.72, 13.5]])
+		self.output_range = np.array([[28.3137, 78.6168], [-11.6272, -0.156108], [1.86478, 183.368], [1.62915, 16.917]])
+		self.target_range = np.array([[32, 35], [-2, -10], [11, 15], [2, 14]])
+		self.global_goal = np.array([31.8, -10.098753, 11, 1.72])
 
 		self.target_output = None
 		self.normalized_target_output = None
@@ -30,12 +33,27 @@ class Env(object):
 		self.cur_output = None
 		self.normalized_cur_output = None
 
-		self.eval_targets = []
+		self.normalization_style = 'Min-Max'#'AutoCKT' 'Min-Max'
+
+		self.eval_targets = [np.array([35, -1.175, 14.7, 13.5]),
+							 np.array([32, -1.175, 14.7, 13.5]),
+							 np.array([35, -10, 14.7, 13.5]),
+							 np.array([35, -1.175, 11, 13.5]),
+							 np.array([35, -1.175, 14.7, 2]),
+							 np.array([33, -5, 12.5, 7])]
+
+		'''
 		for _ in range(6):
 			self.eval_targets.append(self.random_target())
+		'''
+
+
+		self.target_sweep = self.sweep_target()
+		
 
 	def reset(self):
-		self.target_output = self.random_target()
+		self.target_output = random.choice(self.target_sweep)#self.random_target()
+		print("select target {}".format(self.target_output))
 
 		self.cur_input = np.array([32, 32, 25])#self.random_input()
 
@@ -44,6 +62,15 @@ class Env(object):
 		state = self.__get_state__(self.cur_input, self.cur_output, self.target_output)
 
 		return state
+
+	def sweep_target(self,):
+		ratio  = 0.5
+		PowerDC_vals = np.linspace(self.target_range[0,0], self.target_range[0,1], 10).round(2)
+		GBW_vals = np.linspace(self.target_range[1,0], self.target_range[1,1], 10).round(2)
+		RmsNoise_vals = np.linspace(self.target_range[2,0], self.target_range[2,1], 10).round(2)
+		SettlingTime_vals = np.linspace(self.target_range[3,0], self.target_range[3,1], 10).round(2)
+		sweep_target_list = list(itertools.product(PowerDC_vals, GBW_vals, RmsNoise_vals, SettlingTime_vals))
+		return sweep_target_list
 
 
 	def reset_eval(self):
@@ -158,22 +185,52 @@ class Env(object):
 		return PowerDC, GBW, RmsNoise, SettlingTime
 
 	def __get_state__(self, input, output, target):
-		normalized_output = self.__normalization__(output)
-		normalized_target = self.__normalization__(target)
+		normalized_input = self.__input_normalization__(input)
+		normalized_output = self.__normalization__(output, self.global_goal)
+		normalized_target = self.__normalization__(target, self.global_goal)
 
-		return np.concatenate([input, normalized_output, normalized_target]) 
+		return np.concatenate([normalized_input, normalized_output, normalized_target])
+	def __input_normalization__(self, input):
+		input_min = self.input_range[:, 0]
+		input_max = self.input_range[:, 1]
+		normalized_input = (input - input_min) / (input_max - input_min)
+		return normalized_input
 
 	def __get_reward__(self, output, target):
-		normalized_output = self.__normalization__(output)
-		normalized_target = self.__normalization__(target)
-		reward = -np.abs((normalized_output - normalized_target)).sum()
+		if self.normalization_style == 'Min-Max':
+			normalized_output = self.__normalization__(output, self.global_goal)
+			normalized_target = self.__normalization__(target, self.global_goal)
+			relative_output = normalized_output - normalized_target
+			reward = 0
+			count = 0
+			for element in relative_output:
+				if element > 0.1:
+					reward -= element
+				else:
+					count += 1
+			if count == 4:
+				self.num_hit += 1
 
-		return reward if reward < -0.01 else 100
+			return reward if count < 4 else 10
 
-	def __normalization__(self, output):
-		output_min = self.output_range[:, 0]
-		output_max = self.output_range[:, 1]
-		normalized_output = (output - output_min) / (output_max - output_min)
+		elif self.normalization_style == 'AutoCKT':
+			relative_output = self.__normalization__(output, target)
+			reward = 0
+			for element in relative_output:
+				if element > 0:
+					reward -= element
+			return reward if reward < -0.02 else 10
+
+
+	def __normalization__(self, output, goal=None):
+		if self.normalization_style == 'Min-Max':
+			output_min = self.output_range[:, 0]
+			output_max = self.output_range[:, 1]
+			normalized_output = (output - output_min) / (output_max - output_min)
+		elif self.normalization_style == 'AutoCKT':
+			if goal is None:
+				goal = self.global_goal
+			normalized_output = (output - goal) / np.abs(output + goal)
 
 		return normalized_output
 
@@ -189,10 +246,10 @@ class Env(object):
 		self.cur_input = self.__modify_input__(self.cur_input, action)
 		start_time = time.time()
 		self.cur_output = self.__simulator_step__(self.cur_input)
-		print("env {}, time {}".format(self.env_id, time.time() - start_time))
+		#print("env {}, time {}".format(self.env_id, time.time() - start_time))
 		state = self.__get_state__(self.cur_input, self.cur_output, self.target_output)
 
-		reward = self.__get_reward__(self.cur_output, self.target_output) * 0.1
+		reward = self.__get_reward__(self.cur_output, self.target_output)
 
 		return state, reward
 
