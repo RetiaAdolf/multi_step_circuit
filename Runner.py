@@ -1,4 +1,5 @@
 import concurrent.futures
+from concurrent.futures import wait
 import numpy as np
 import time
 class runner(object):
@@ -10,7 +11,7 @@ class runner(object):
 		self.worker_num = len(self.envs)
 		self.state_dim = self.envs[0].state_dim
 		self.action_dim = self.envs[0].action_dim
-		self.horizon = 30
+		self.horizon = 50
 		self.gamma = gamma
 		self.batch = {"state": np.zeros((self.horizon, self.worker_num, self.state_dim)),
 					  "action": np.zeros((self.horizon, self.worker_num, 1)),
@@ -32,7 +33,8 @@ class runner(object):
 				futures = [executor.submit(env.reset_eval) for env in self.envs]
 			else:
 				futures = [executor.submit(env.reset) for env in self.envs]
-			for future in concurrent.futures.as_completed(futures):
+			wait(futures)
+			for future in futures:
 				try:
 					state = future.result()
 					state_list.append(state)
@@ -53,7 +55,8 @@ class runner(object):
 		with concurrent.futures.ThreadPoolExecutor(max_workers=self.worker_num) as executor:
 			# Start the load operations and mark each future with its URL
 			futures = [executor.submit(env.step, actions[i]) for i,env in enumerate(self.envs)]
-			for future in concurrent.futures.as_completed(futures):
+			wait(futures)
+			for future in futures:
 				if True:
 					next_state, reward = future.result()
 					next_state_list.append(next_state)
@@ -70,14 +73,14 @@ class runner(object):
 			start_time = time.time()
 			action, log_prob = self.agent.get_action(state)
 			next_state, reward = self.step(action)
-			#print("step {}, reward {}, time {}".format(h, np.mean(reward), time.time()-start_time))
+			print("step {}, reward {}, time {}".format(h, reward, time.time()-start_time))
 			self.batch['state'][h] = state
 			self.batch['action'][h] = action
 			self.batch['log_prob'][h] = log_prob
 			self.batch['reward'][h] = reward
 			state = next_state
 		self.batch['return'] = self.GetDiscountedReward(self.batch['reward'], self.gamma)
-		return self.batch, {'return': self.batch['return'][0].mean(), 'best_reward': self.batch['return'][-1].mean()}
+		return self.batch, {'return': self.batch['return'][0].mean(), 'best_reward': self.batch['reward'].max(axis=0).mean()}
 
 
 		

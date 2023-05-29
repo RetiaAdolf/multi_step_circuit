@@ -47,10 +47,7 @@ from Runner import runner
 import numpy as np
 import random
 
-PowerDC, GBW, RmsNoise, SettlingTime, iters = sys.argv[1:]
-target_state = np.array([float(PowerDC), float(GBW), float(RmsNoise), float(SettlingTime)])
-model_path = "models/EDA_iter_{}".format(iters)
-hidden_size = 512
+hidden_size = 1024
 NUM_WORKERS = 6
 
 Envs = [Env(i) for i in range(1, 1 + NUM_WORKERS)]
@@ -62,8 +59,8 @@ agent = PPO(input_dim=Envs[0].state_dim,
 best_reward = -9999
 best_model = 0
 runner = runner(Envs, agent, 0.99)
-for i in range(10000, 50000, 100):
-	model_path = "models/EDA_iter_{}".format(i)
+for i in range(0, 6000, 100):
+	model_path = "EDA_iter_{}".format(i)
 	try:
 		agent.load_checkpoint(ckpt_path=model_path, evaluate=True)
 	except:
@@ -73,4 +70,3 @@ for i in range(10000, 50000, 100):
 		best_reward = log['best_reward']
 		best_model = i
 print(best_model, best_reward)
-'''

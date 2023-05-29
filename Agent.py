@@ -127,10 +127,10 @@ class PPO(object):
 	"""docstring for PPO"""
 	def __init__(self, input_dim, action_dim, hidden_dim, gamma):
 		super(PPO, self).__init__()
-		self.lr = 3e-5
+		self.lr = 5e-6
 		self.gamma = gamma
 		self.K = 5
-		self.ratio_clip = 0.2
+		self.ratio_clip = 0.1
 		self.alpha = 0.5
 		self.beta = 1e-2
 		self.device = torch.device("cuda")
@@ -140,6 +140,7 @@ class PPO(object):
 
 	def get_action(self, state):
 		state = torch.tensor(state, dtype=torch.float, device=self.device)
+		#print(state)
 		state = state.unsqueeze(0)
 		action, log_prob, _, _ = self.policy(state)
 		return action.squeeze(0).detach().cpu().numpy(), log_prob.squeeze(0).detach().cpu().numpy()

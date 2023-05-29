@@ -59,6 +59,7 @@ class PPOPolicy(nn.Module):
 		logit = self.linear_pi(x)
 		value = self.linear_v(x)
 		dist = Categorical(logits=logit)
+		#print(logit)
 		if action is None:
 			action = dist.sample()
 		else:
